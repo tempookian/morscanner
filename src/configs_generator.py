@@ -3,11 +3,24 @@ collect tools to interact with Morteza's domains
 """
 import configparser
 import re
+import os
 
 import requests
 
 ip_v4_regex = r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
-vless_template = "vless://{uuid}@{address}:{port}?sni={host}&security=tls&type=ws&path={path}&host={host}#{name}"
+
+# templates
+# vless_ws_template = "vless://{uuid}@{address}:{port}?sni={host}&security=tls&type=ws&path={path}&host={host}#{name}"
+templates = dict(
+    vless_ws = "vless://{uuid}@{address}:{port}?path={path}&security=tls&encryption=none&alpn=http/1.1&host={host}&type=ws&sni={host}#{name}",
+    vless_grpc = "vless://{uuid}@{address}:{port}?mode=gun&security=tls&encryption=none&alpn=h2&type=grpc&serviceName={servicename}&sni={host}#{name}",
+    trojan_grpc = "trojan://{password}@{address}:{port}?mode=multi&security=tls&alpn=h2&type=grpc&serviceName={servicename}&sni={host}#{name}"
+)
+
+
+reserved_sections = [
+    "filesconfig"
+]
 
 
 def extract_ips(url="http://bot.sudoer.net/best.cf.iran.all"):
@@ -16,21 +29,12 @@ def extract_ips(url="http://bot.sudoer.net/best.cf.iran.all"):
     return ips
 
 
-def read_config(config_name="baseconfig"):
-    conf = configparser.ConfigParser()
-    conf.read("../config.ini")
-    name = conf[config_name]["name"]
-    uuid = conf[config_name]["uuid"]
-    path = conf[config_name]["path"]
-    host = conf[config_name]["host"]
-    port = conf[config_name]["port"]
+def read_config(config_name):
+    confs = configparser.ConfigParser()
+    confs.read("../config.ini")
 
     conf_dict = dict(
-        name=name,
-        uuid=uuid,
-        path=path,
-        host=host,
-        port=port
+        confs[config_name]
     )
 
     return conf_dict
@@ -38,13 +42,24 @@ def read_config(config_name="baseconfig"):
 
 def ip_to_conf(ip: str):
     config = read_config()
-    vless_str = vless_template.format(address=ip, **config)
+    vless_str = vless_ws_template.format(address=ip, **config)
     return vless_str
 
 
 if __name__ == "__main__":
     ips = extract_ips()
-    configs = [ip_to_conf(ip) for ip in ips]
-
-    with open("/tmp/results.conf", "w") as outf:
-        outf.write("\n".join(configs))
+        
+    configini = configparser.ConfigParser()
+    configini.read("../config.ini")
+    for conf_name in configini.sections():
+        if conf_name in reserved_sections:
+            continue
+        conf = dict(configini[conf_name])
+        conf["name"] = conf_name
+        template = templates[f"{conf['protocol']}_{conf['type']}"]
+        this_confs = [template.format(address=ip, **conf) for ip in ips]
+        
+        writepath = os.path.join(configini["filesconfig"]["outputpath"], conf_name)
+        os.makedirs(configini["filesconfig"]["outputpath"], exist_ok=True)
+        with open(writepath, "w") as outfile:
+            outfile.write("\n".join(this_confs))
